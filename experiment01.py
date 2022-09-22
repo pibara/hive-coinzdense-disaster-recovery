@@ -22,7 +22,10 @@ def pubkey_to_compressed(pubkey):
     x = pubkey.point.x.to_bytes(32, byteorder='big')
     yred = (2 + pubkey.point.y % 2).to_bytes(1, byteorder='big')
     cpubkey = yred + x
-    return cpubkey + sha256(sha256(cpubkey).digest()).digest()[:4] #FIXME: The WIF checksum seems different for pub/priv ???
+    hash1 = hashlib.new('ripemd160')
+    hash1.update(cpubkey)
+    checksum = hash1.digest()[:4]
+    return cpubkey + checksum
 
 def pubkey_to_uncompressed(pubkey):
     x = pubkey.point.x.to_bytes(32, byteorder='big')
@@ -46,12 +49,8 @@ class HiveAccount:
         self.disaster = key_from_creds(username, self.scope, password)
         postingkey = PrivateKey.fromString(hexlify(self.posting))
         posting_public = pubkey_to_compressed(postingkey.publicKey())
-        print("DEBUG:", hexlify(posting_public).decode("ascii"))
-        print("DEBUG:", hexlify(b58decode("7NnGYwhwPqeoUARJiWJCqp5bFxbSnNUG1fjRLxD4xnp9SJrwPE")).decode("ascii"))
         client = Client()
-        b58key = b58encode(posting_public).decode("ascii")
-        print("DEBUG:", b58key)
-        print("DEBUG:", "7NnGYwhwPqeoUARJiWJCqp5bFxbSnNUG1fjRLxD4xnp9SJrwPE")
+        b58key = "STM" + b58encode(posting_public).decode("ascii")
         try:
             keyrefs = client.get_key_references([b58key])
             if keyrefs[0][0] != username:
