@@ -14,6 +14,12 @@ account creation procedures.
 
 This script creates a disaster recovery key from the same master password that was used to create the OWNER/ACTIVE/POSTING key and registers it as account JSON content. Only the password needs to be supplied by the user.
 
+```
+$ ./mpass-disaster.py pibarabank
+Password for pibarabank: 
+Registered disaster recovery key
+```
+
 # opass-disaster.py (TODO)
 
 This script creates a disaster recovery key from a different password than that that was used to create the OWNER/ACTIVE/POSTING.
