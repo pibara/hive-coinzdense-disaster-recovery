@@ -10,5 +10,5 @@ hqpdr-userpost-masterpass myhiveaccount
 ```
 If instead you only have your owner key and your active key call:
 ```
-hqpdr-userpost-randomkey
+hqpdr-userpost-randomkey myhiveaccount
 ```
