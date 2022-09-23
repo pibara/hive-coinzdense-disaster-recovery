@@ -17,7 +17,7 @@ from nacl.encoding import RawEncoder
 import bip39
 from lighthive.client import Client
 from lighthive.datastructures import Operation
-from base58 import b58encode
+from base58 import b58encode, b58decode
 
 
 class Keytype(Enum):
@@ -82,6 +82,52 @@ def key_to_wif(binkey, keytype):
         checksum = hash1.digest()[:4]
     return prefixmap[keytype] + b58encode(fullkey + checksum).decode("ascii")
 
+def wif_to_binary(wif, expectedtype):
+    """Restore binary key from WIF
+
+    Parameters
+    ----------
+    wif : string
+        wif base58 encoded key
+    expectedtype : Keytype
+        expected type of Wif encoded key
+
+    Returns
+    -------
+    bytes
+        The binary key
+
+    Raises
+    ------
+    RuntimeError
+        Thrown if WIF not of right type.
+    """
+    prefixmap = {
+        "QRK": Keytype.QDRECOVERYPUBKEY,
+        "CZD": Keytype.COINZDENSEPUBKEY,
+        "STM": Keytype.ECDSACOMPRESSEDPUBKEY
+    }
+    netmap = {
+        b'\xbb': Keytype.QDRECOVERYPRIVKEY,
+        b'\xbd': Keytype.COINZDENSEPRIVKEY,
+        b'\x80': Keytype.ECDSAPRIVKEY
+    }
+    if wif[:3] in prefixmap:
+        keytype = prefixmap[wif[:3]]
+        binkey = b58decode(wif[3:])[:-4]
+    else:
+        binwif = b58decode(wif)
+        binkey = binwif[1:-4]
+        if binwif[0] in netmap:
+            keytype = netmap[binwif[0]]
+        else:
+            raise RuntimeError("Invalid input WIF")
+    if keytype != expectedtype:
+        raise RuntimeError("WIF of incorrect type")
+    recalculated = key_to_wif(binkey, keytype)
+    if recalculated != wif:
+        raise RuntimeError("Invalid input WIF")
+    return binkey
 
 def pubkey_to_compressed(pubkey):
     """Convert an ecdsa pubkey object to a compressed binary key
@@ -120,16 +166,27 @@ def key_from_creds(account, role, password):
     seed = account + role + password
     return sha256(seed.encode("latin1")).digest()
 
+
+
 class HiveAccount:
     """Class representing HIVE account."""
-    def __init__(self, username, password):
+    def __init__(self, username, password=None, ownerwif=None, activewif=None, wif=None):
         """Constructor"""
         self.scope = "disaster"
         self.keylen = 32
         self.username = username
-        self.owner = key_from_creds(username, "owner", password)
-        self.active = key_from_creds(username, "active", password)
-        self.disaster = key_from_creds(username, self.scope, password)
+        if ownerwif is None:
+            self.owner = key_from_creds(username, "owner", password)
+        else:
+            self.owner = wif_to_binary(ownerwif, Keytype.ECDSAPRIVKEY)
+        if activewif is None:
+            self.active = key_from_creds(username, "active", password)
+        else:
+            self.active = wif_to_binary(activewif, Keytype.ECDSAPRIVKEY)
+        if password is not None:
+            self.disaster = key_from_creds(username, self.scope, password)
+        else:
+            self.disaster = wif_to_binary(wif, Keytype.QDRECOVERYPRIVKEY)
         activekey = PrivateKey.fromString(hexlify(self.active))
         self.client = Client()
         b58key = key_to_wif(pubkey_to_compressed(activekey.publicKey()), Keytype.ECDSACOMPRESSEDPUBKEY)
@@ -202,8 +259,8 @@ class HiveAccount:
         ]
         clnt.broadcast(ops)
 
-def main():
-    """Temporary one-function main, needs to implement subcommands soon"""
+def _main_userpost_masterpass():
+    """Main for publishing a HIVE master-password-derived disaster-recovery key as account meta."""
     if len(argv) < 2:
         print("Please supply an account name on the commandline")
         sys.exit(1)
@@ -213,5 +270,82 @@ def main():
     account.update_account_json()
     print("Registered disaster recovery key")
 
+def _main_userpost_altpass():
+    """Main for publishing an alternate-password-derived disaster-recovery key as account meta."""
+    if len(argv) < 2:
+        print("Please supply an account name on the commandline")
+        sys.exit(1)
+    username = argv[1]
+    password = getpass("Password : ")
+    owner = getpass("Owner Key : ")
+    active = getpass("Active key : ")
+    account = HiveAccount(username, password=password, ownerwif=owner, activewif=active)
+    account.update_account_json()
+    print("Registered disaster recovery key")
+
+def _main_userpost_randomkey():
+    """Main for publishing a new randomly created disaster-recovery key as account meta."""
+    if len(argv) < 2:
+        print("Please supply an account name on the commandline")
+        sys.exit(1)
+    username = argv[1]
+    wif = key_to_wif(crypto_kdf_keygen(), Keytype.QDRECOVERYPRIVKEY)
+    print("New disaster recovery key :", wif)
+    owner = getpass("Owner Key : ")
+    active = getpass("Active key : ")
+    account = HiveAccount(username, wif=wif, ownerwif=owner, activewif=active)
+    account.update_account_json()
+    print("Registered disaster recovery key")
+    print("Make sure to store the new disaster recovery key somewhere safe")
+
+def _main_userpost_wif():
+    """Main for publishing an existing disaster-recovery key as account meta."""
+    if len(argv) < 2:
+        print("Please supply an account name on the commandline")
+        sys.exit(1)
+    username = argv[1]
+    wif = getpass("Disaster-Recovery Key : ")
+    owner = getpass("Owner Key : ")
+    active = getpass("Active key : ")
+    account = HiveAccount(username, wif=wif, ownerwif=owner, activewif=active)
+    account.update_account_json()
+    print("Registered disaster recovery key")
+
+def _main_userverify_ecdsa():
+    """Main for ECDSA check of published disaster-recovery key"""
+    print("ERROR: Not yet implemented")
+
+def _main_disasterkey_pass():
+    """Main for getting the private disaster recovery key from the master password without network interaction"""
+    print("ERROR: Not yet implemented")
+
+def _main_disasterkey_bip38():
+    """Main for restoring the private disaster recovery key from bip38 word list"""
+    print("ERROR: Not yet implemented")
+
+def _main_bip38_masterpass():
+    """Main for turning the private disaster recovery key into a bip38 word list"""
+    print("ERROR: Not yet implemented")
+
+def _main_bip38_masterpass():
+    """Main for getting the bip38 word list of the private disaster recovery key from the master password"""
+    print("ERROR: Not yet implemented")
+
+def _main_sign_pass():
+    """Main to sign a hex encoded binary object with private disaster recovery key using the master password"""
+    print("ERROR: Not yet implemented")
+
+def _main_sign_wif():
+    """Main to sign a hex encoded binary object with private disaster recovery key using Wif"""
+    print("ERROR: Not yet implemented")
+
+def _main_sign_bip38():
+    """Main to sign a hex encoded binary object with private disaster recovery key using bip38 wordlist"""
+    print("ERROR: Not yet implemented")
+
+def _main_validate():
+    """Main to validate a private disaster recovery key signed hex encoded binary object."""
+    print("ERROR: Not yet implemented")
+
 if __name__ == "__main__":
-    main()
+    _main_userpost_masterpass()
