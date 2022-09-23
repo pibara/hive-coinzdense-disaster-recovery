@@ -118,9 +118,10 @@ def wif_to_binary(wif, expectedtype):
     else:
         binwif = b58decode(wif)
         binkey = binwif[1:-4]
-        if binwif[0] in netmap:
-            keytype = netmap[binwif[0]]
+        if binwif[0:1] in netmap:
+            keytype = netmap[binwif[0:1]]
         else:
+            print(wif, expectedtype, hexlify(binwif), binwif[0:1], netmap)
             raise RuntimeError("Invalid input WIF")
     if keytype != expectedtype:
         raise RuntimeError("WIF of incorrect type")
@@ -192,6 +193,7 @@ class HiveAccount:
         b58key = key_to_wif(pubkey_to_compressed(activekey.publicKey()), Keytype.ECDSACOMPRESSEDPUBKEY)
         keyrefs = self.client.get_key_references([b58key])
         if not keyrefs[0] or keyrefs[0][0] != username:
+            print(keyrefs, username)
             raise RuntimeError("ERROR: User and password don't match with HIVE account.")
     def _disaster_pubkey(self):
         """Derive the binary disaster recovery pubkey from the binary private key"""
@@ -323,7 +325,7 @@ def _main_disasterkey_bip38():
     """Main for restoring the private disaster recovery key from bip38 word list"""
     print("ERROR: Not yet implemented")
 
-def _main_bip38_masterpass():
+def _main_bip38_wif():
     """Main for turning the private disaster recovery key into a bip38 word list"""
     print("ERROR: Not yet implemented")
 

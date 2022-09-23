@@ -20,7 +20,7 @@ setup(
             'hqpdr-userpost-randomkey = hiveqdpr:_main_userpost_randomkey',
             'hqpdr-userpost-wif = hiveqdpr:_main_userpost_wif',
             'hqpdr-userverify-ecdsa = hiveqdpr:_main_userverify_ecdsa',
-            'hqpdr-disasterkey-masterpass = hiveqdpr:_main_disasterkey_masterpass',
+            'hqpdr-disasterkey-pass = hiveqdpr:_main_disasterkey_pass',
             'hqpdr-disasterkey-bip39 = hiveqdpr:_main_disasterkey_bip38',
             'hqpdr-bip39-wif = hiveqdpr:_main_bip38_wif',
             'hqpdr-bip39-masterpass = hiveqdpr:_main_bip38_masterpass',
