@@ -9,7 +9,9 @@ from getpass import getpass
 from binascii import hexlify
 from enum import Enum
 from ellipticcurve.privateKey import PrivateKey
+from ellipticcurve.publicKey import PublicKey
 from ellipticcurve import ecdsa
+from ellipticcurve import signature as ecdsasignature
 from libnacl import crypto_kdf_keygen as _nacl2_keygen
 from libnacl import crypto_kdf_derive_from_key as _nacl2_key_derive
 from nacl.hash import blake2b as _nacl1_hash_function
@@ -433,6 +435,25 @@ def key_from_creds(account, role, password):
 # END OF CODE THAT NEEDS MINOR REFACTOR TO BE MADE PART OF COINZDENSE
 
 def check_role_wif(client, username, wif, role):
+    """Check if this WIF actually belongs to the user under the given role
+
+    Parameters
+    ----------
+    client : lighthive.client.Client
+               HIVE client
+    username : string
+                 HIVE account name
+    wif : string
+            HIVE private key WIF
+    role : string
+            NAME of the HIVE role belonging with this WIF
+
+    Raises
+    ------
+
+    RuntimeError
+        Raised if the role/user don't match the WIF
+    """
     activekey = PrivateKey.fromString(hexlify(wif_to_binary(wif, Keytype.ECDSAPRIVKEY)))
     b58key = key_to_wif(pubkey_to_compressed(activekey.publicKey()), Keytype.ECDSACOMPRESSEDPUBKEY)
     account_infos = client.get_accounts([username])
@@ -519,10 +540,9 @@ class HiveAccount:
     def update_account_json(self):
         """Store the OWNER-key ECDSA signed disaster recovery pubkey on as HIVE account JSON metadata"""
         json_meta = self.client.get_accounts([self.username])[0]["json_metadata"]
-        if json_meta == "":
-            account_obj = {}
-        else:
-            account_obj = json.loads(self.client.get_accounts([self.username])[0]["json_metadata"])
+        account_obj = json.loads(
+                self.client.get_accounts([self.username])[0]["json_metadata"]
+                ) if json_meta else {}
         if "coinzdense_disaster_recovery" not in account_obj:
             account_obj["coinzdense_disaster_recovery"] = {}
         pubkey = self._disaster_pubkey()
@@ -566,8 +586,7 @@ def _main_userpost_altpass():
     username = argv[1]
     password = getpass("Password : ")
     owner = getpass("Owner Key (press enter if you don't have one): ")
-    if owner == "":
-        owner=None
+    owner = owner if owner else None
     active = getpass("Active key : ")
     account = HiveAccount(username, password=password, ownerwif=owner, activewif=active)
     account.update_account_json()
@@ -582,8 +601,7 @@ def _main_userpost_randomkey():
     wif = key_to_wif(_nacl2_keygen(), Keytype.QDRECOVERYPRIVKEY)
     print("New disaster recovery key :", wif)
     owner = getpass("Owner Key (press enter if you don't have one): ")
-    if owner=="":
-        owner=None
+    owner = owner if owner else None
     active = getpass("Active key : ")
     account = HiveAccount(username, wif=wif, ownerwif=owner, activewif=active)
     account.update_account_json()
@@ -598,16 +616,53 @@ def _main_userpost_wif():
     username = argv[1]
     wif = getpass("Disaster-Recovery Key : ")
     owner = getpass("Owner Key (press enter if you don't have one): ")
-    if owner=="":
-        owner=None
+    owner = owner if owner else None
     active = getpass("Active key : ")
     account = HiveAccount(username, wif=wif, ownerwif=owner, activewif=active)
     account.update_account_json()
     print("Registered disaster recovery key")
 
+def _userverify_ecdsa(rolename, roleinfo, key, sig):
+    pubkeys = []
+    if 'key_auths' in roleinfo:
+        for auth in roleinfo['key_auths']:
+            pubkeys.append(auth[0])
+    binkey = wif_to_binary(key, Keytype.QDRECOVERYPUBKEY)
+    binsig = b58decode(sig)
+    for pubkey in pubkeys:
+        print("THIS IS GOING TO FAIL, STARKBANK-ECDSA DOESNT SUPORT THE COMPRESSED PUBKEYS HIVE USES!")
+        pubkey2 = PublicKey.fromString(hexlify(wif_to_binary(pubkey, Keytype.ECDSACOMPRESSEDPUBKEY)))
+        sign = ecdsasignature.Signature.fromDer(binsig, recoveryByte=True)
+        isok = ecdsa.Ecdsa.verify(binkey, sign, pubkey2)
+        # pylint: disable=consider-using-assignment-expr
+        if isok:
+            print("Key was signed by", rolename)
+            return True
+    return False
+
 def _main_userverify_ecdsa():
     """Main for ECDSA check of published disaster-recovery key"""
-    print("ERROR: Not yet implemented")
+    if len(argv) < 2:
+        print("Please supply an account name on the commandline")
+        sys.exit(1)
+    username = argv[1]
+    client = Client()
+    account_infos = client.get_accounts([username])
+    # pylint: disable=consider-using-assignment-expr
+    if not account_infos:
+        print("ERROR: No such account")
+        return
+    account_info = account_infos[0]
+    json_meta = account_info["json_metadata"]
+    account_obj = json.loads(json_meta) if json_meta else {}
+    if "coinzdense_disaster_recovery" not in account_obj:
+        print("ERROR: No disaster recovery key registered for account")
+        return
+    drinfo = account_obj["coinzdense_disaster_recovery"]
+    if "key" in drinfo and "sig" in drinfo:
+        _userverify_ecdsa("OWNER", account_info["owner"], drinfo["key"], drinfo["sig"])
+    if "key-a" in drinfo and "sig-a" in drinfo:
+        _userverify_ecdsa("ACTIVE", account_info["active"], drinfo["key"], drinfo["sig"])
 
 def _main_disasterkey_pass():
     """Main for getting the private disaster recovery key from the master password without network interaction"""
