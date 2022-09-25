@@ -518,7 +518,11 @@ class HiveAccount:
 
     def update_account_json(self):
         """Store the OWNER-key ECDSA signed disaster recovery pubkey on as HIVE account JSON metadata"""
-        account_obj = json.loads(self.client.get_accounts([self.username])[0]["json_metadata"])
+        json_meta = self.client.get_accounts([self.username])[0]["json_metadata"]
+        if json_meta == "":
+            account_obj = {}
+        else:
+            account_obj = json.loads(self.client.get_accounts([self.username])[0]["json_metadata"])
         if "coinzdense_disaster_recovery" not in account_obj:
             account_obj["coinzdense_disaster_recovery"] = {}
         pubkey = self._disaster_pubkey()
