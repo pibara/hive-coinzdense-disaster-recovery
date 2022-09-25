@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='hiveqdpr',
-    version="0.1.0",
+    version="0.2.0",
     description="Hive Quantum-Disaster Prepare tool",
     long_description="Leave some data on your HIVE account for a one-time quantum disaster recovery.",
     author='Rob Meijer',
