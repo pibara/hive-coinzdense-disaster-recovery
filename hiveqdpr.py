@@ -432,6 +432,19 @@ def key_from_creds(account, role, password):
 
 # END OF CODE THAT NEEDS MINOR REFACTOR TO BE MADE PART OF COINZDENSE
 
+def check_role_wif(client, username, wif, role):
+    activekey = PrivateKey.fromString(hexlify(wif_to_binary(wif, Keytype.ECDSAPRIVKEY)))
+    b58key = key_to_wif(pubkey_to_compressed(activekey.publicKey()), Keytype.ECDSACOMPRESSEDPUBKEY)
+    account_infos = client.get_accounts([username])
+    for accountinfo in account_infos:
+        if role in accountinfo:
+            rinfo = accountinfo[role]
+            if 'key_auths' in rinfo:
+                for auth in rinfo['key_auths']:
+                    if auth[0] == b58key:
+                        return
+    raise RuntimeError("Not the " + role + " key for " + username)
+
 class HiveAccount:
     """Class representing HIVE account."""
     def __init__(self, username, password=None, ownerwif=None, activewif=None, wif=None):
@@ -440,20 +453,25 @@ class HiveAccount:
         self.keylen = 24
         self.otsbits = 12
         self.username = username
+        self.client = Client()
         if ownerwif is None:
-            self.owner = key_from_creds(username, "owner", password)
+            if activewif is None:
+                self.owner = key_from_creds(username, "owner", password)
+            else:
+                self.owner = None
         else:
+            check_role_wif(self.client, username, ownerwif, "owner")
             self.owner = wif_to_binary(ownerwif, Keytype.ECDSAPRIVKEY)
         if activewif is None:
             self.active = key_from_creds(username, "active", password)
         else:
+            check_role_wif(self.client, username, activewif, "active")
             self.active = wif_to_binary(activewif, Keytype.ECDSAPRIVKEY)
         if password is not None:
             self.disaster = key_from_creds(username, self.scope, password)
         else:
             self.disaster = wif_to_binary(wif, Keytype.QDRECOVERYPRIVKEY)
         activekey = PrivateKey.fromString(hexlify(self.active))
-        self.client = Client()
         b58key = key_to_wif(pubkey_to_compressed(activekey.publicKey()), Keytype.ECDSACOMPRESSEDPUBKEY)
         keyrefs = self.client.get_key_references([b58key])
         if not keyrefs[0] or keyrefs[0][0] != username:
@@ -492,15 +510,26 @@ class HiveAccount:
         sig =  ecdsa.Ecdsa.sign(data.decode("latin1"), ecdsa_signingkey)
         return sig.toDer(withRecoveryId=True)
 
+    def _active_sign(self, data):
+        """Sign the disastery recovery key with the ECDSA owner key"""
+        ecdsa_signingkey = PrivateKey.fromString( hexlify(self.active))
+        sig =  ecdsa.Ecdsa.sign(data.decode("latin1"), ecdsa_signingkey)
+        return sig.toDer(withRecoveryId=True)
+
     def update_account_json(self):
         """Store the OWNER-key ECDSA signed disaster recovery pubkey on as HIVE account JSON metadata"""
         account_obj = json.loads(self.client.get_accounts([self.username])[0]["json_metadata"])
+        if "coinzdense_disaster_recovery" not in account_obj:
+            account_obj["coinzdense_disaster_recovery"] = {}
         pubkey = self._disaster_pubkey()
-        sig = self._owner_sign(pubkey)
-        keyinfo = {}
-        keyinfo["key"] = key_to_wif(pubkey, Keytype.QDRECOVERYPUBKEY)
-        keyinfo["sig"] = b58encode(sig).decode("latin1")
-        account_obj["coinzdense_disaster_recovery"] = keyinfo
+        if self.owner is not None:
+            sig = self._owner_sign(pubkey)
+            account_obj["coinzdense_disaster_recovery"]["key"] = key_to_wif(pubkey, Keytype.QDRECOVERYPUBKEY)
+            account_obj["coinzdense_disaster_recovery"]["sig"] = b58encode(sig).decode("latin1")
+        else:
+            sig = self._active_sign(pubkey)
+            account_obj["coinzdense_disaster_recovery"]["key-a"] = key_to_wif(pubkey, Keytype.QDRECOVERYPUBKEY)
+            account_obj["coinzdense_disaster_recovery"]["sig-a"] = b58encode(sig).decode("latin1")
         newjson = json.dumps(account_obj)
         active = key_to_wif(self.active, Keytype.ECDSAPRIVKEY)
         clnt = Client(keys=[active])
@@ -532,7 +561,9 @@ def _main_userpost_altpass():
         sys.exit(1)
     username = argv[1]
     password = getpass("Password : ")
-    owner = getpass("Owner Key : ")
+    owner = getpass("Owner Key (press enter if you don't have one): ")
+    if owner == "":
+        owner=None
     active = getpass("Active key : ")
     account = HiveAccount(username, password=password, ownerwif=owner, activewif=active)
     account.update_account_json()
@@ -546,7 +577,9 @@ def _main_userpost_randomkey():
     username = argv[1]
     wif = key_to_wif(_nacl2_keygen(), Keytype.QDRECOVERYPRIVKEY)
     print("New disaster recovery key :", wif)
-    owner = getpass("Owner Key : ")
+    owner = getpass("Owner Key (press enter if you don't have one): ")
+    if owner=="":
+        owner=None
     active = getpass("Active key : ")
     account = HiveAccount(username, wif=wif, ownerwif=owner, activewif=active)
     account.update_account_json()
@@ -560,7 +593,9 @@ def _main_userpost_wif():
         sys.exit(1)
     username = argv[1]
     wif = getpass("Disaster-Recovery Key : ")
-    owner = getpass("Owner Key : ")
+    owner = getpass("Owner Key (press enter if you don't have one): ")
+    if owner=="":
+        owner=None
     active = getpass("Active key : ")
     account = HiveAccount(username, wif=wif, ownerwif=owner, activewif=active)
     account.update_account_json()
