@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='hiveqdpr',
-    version="0.2.1",
+    version="0.2.2",
     description="Hive Quantum-Disaster Prepare tool",
     long_description="Leave some data on your HIVE account for a one-time quantum disaster recovery.",
     author='Rob Meijer',
@@ -20,6 +20,7 @@ setup(
             'hqpdr-userpost-randomkey = hiveqdpr:_main_userpost_randomkey',
             'hqpdr-userpost-wif = hiveqdpr:_main_userpost_wif',
             'hqpdr-userverify-ecdsa = hiveqdpr:_main_userverify_ecdsa',
+            'hqpdr-coinzdensepubkey-pass = hiveqdpr:_main_coinzdensepubkey_pass',
             'hqpdr-disasterkey-pass = hiveqdpr:_main_disasterkey_pass',
             'hqpdr-disasterkey-bip39 = hiveqdpr:_main_disasterkey_bip38',
             'hqpdr-bip39-wif = hiveqdpr:_main_bip38_wif',
@@ -41,5 +42,5 @@ setup(
         'Programming Language :: Python :: 3',
         'Topic :: Software Development :: Libraries :: Python Modules',
     ],
-    install_requires=["base58", "lighthive","starkbank-ecdsa","bip39","PyNaCl","libnacl"],
+    install_requires=["base58", "lighthive","starkbank-ecdsa","bip39","PyNaCl","libnacl","sympy"],
 )

@@ -20,6 +20,7 @@ import bip39
 from lighthive.client import Client
 from lighthive.datastructures import Operation
 from base58 import b58encode, b58decode
+from sympy.ntheory import sqrt_mod
 
 # START OF COINZDENSE CODE
 def _ots_pairs_per_signature(hashlen, otsbits):
@@ -284,6 +285,26 @@ class OneTimeValidator:
 
 
 # START OF CODE THAT NEEDS MINOR REFACTOR TO BE MADE PART OF COINZDENSE
+
+def parameterized_coinzdense_pubkey(account, password, hashlen, otsbits, l0height):
+    """Calculate a possible CoinZdense pubkey given parameters"""
+    seedkey = key_from_creds(account, "czdowner", password)
+    otscount = 1 << l0height
+    levelsalt = _nacl2_key_derive(hashlen, 0, "levelslt", seedkey) 
+    entropy_per_signature = _ots_pairs_per_signature(hashlen, otsbits) + 2 # nonce plus spare nonce
+    next_index = 1
+    ots_pubkeys = []
+    for _ in range(0, otscount):
+        otsk = OneTimeSigningKey(hashlen, otsbits, levelsalt, seedkey, next_index)
+        ots_pubkeys.append(otsk.get_pubkey())
+        next_index += entropy_per_signature
+    while len(ots_pubkeys) > 1:
+        ots_pubkeys = [_nacl1_hash_function(ots_pubkeys[i] + ots_pubkeys[i+1],
+                                            digest_size=hashlen,
+                                            key=levelsalt,
+                                            encoder=_Nacl1RawEncoder) for i in range(0, len(ots_pubkeys),2)]
+    return key_to_wif(ots_pubkeys[0], Keytype.COINZDENSEPUBKEY)
+
 class Keytype(Enum):
     """Enum class for key types"""
     QDRECOVERYPUBKEY = 1
@@ -412,6 +433,44 @@ def pubkey_to_compressed(pubkey):
     yred = (2 + pubkey.point.y % 2).to_bytes(1, byteorder='big')
     return yred + xval
 
+def compressed_to_pubkey(compressed):
+    """Convert a compressed binary key to an ecdsa pubkey object
+
+    Parameters
+    ----------
+    pubkey : bytes
+        Binary compressed pubkey without WIF checksum
+
+    Returns
+    -------
+    ellipticcurve.PublicKey
+        ECDSA pubkey object
+    """
+    _p = 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f
+    switchbyte = compressed[:1]
+    x_coord = int.from_bytes(compressed[1:], byteorder='big', signed=False)
+    y_values = sqrt_mod( (x_coord**3 + 7) % _p, _p, True )
+    if switchbyte == b'\x02':
+        if y_values[0] % 2 == 0:
+            y_coord = y_values[0]
+        else:
+            y_coord = y_values[1]
+    elif switchbyte == b'\x03':
+        if y_values[0] % 2 == 0:
+            y_coord = y_values[1]
+        else:
+            y_coord = y_values[0]
+    else:
+        raise RuntimeError("Invalid SEC compressed format")
+    uncompressed = hexlify(
+                       compressed[1:] + y_coord.to_bytes(
+                           32,
+                           byteorder='big',
+                           signed=False
+                       )
+                   )
+    return PublicKey.fromString(uncompressed)
+
 def key_from_creds(account, role, password):
     """Derive a key from the master password
 
@@ -496,7 +555,6 @@ class HiveAccount:
         b58key = key_to_wif(pubkey_to_compressed(activekey.publicKey()), Keytype.ECDSACOMPRESSEDPUBKEY)
         keyrefs = self.client.get_key_references([b58key])
         if not keyrefs[0] or keyrefs[0][0] != username:
-            print(keyrefs, username)
             raise RuntimeError("ERROR: User and password don't match with HIVE account.")
     def _disaster_pubkey(self):
         """Derive the binary disaster recovery pubkey from the binary private key"""
@@ -630,13 +688,12 @@ def _userverify_ecdsa(rolename, roleinfo, key, sig):
     binkey = wif_to_binary(key, Keytype.QDRECOVERYPUBKEY)
     binsig = b58decode(sig)
     for pubkey in pubkeys:
-        print("THIS IS GOING TO FAIL, STARKBANK-ECDSA DOESNT SUPORT THE COMPRESSED PUBKEYS HIVE USES!")
-        pubkey2 = PublicKey.fromString(hexlify(wif_to_binary(pubkey, Keytype.ECDSACOMPRESSEDPUBKEY)))
+        pubkey2 = compressed_to_pubkey(wif_to_binary(pubkey, Keytype.ECDSACOMPRESSEDPUBKEY)) 
         sign = ecdsasignature.Signature.fromDer(binsig, recoveryByte=True)
-        isok = ecdsa.Ecdsa.verify(binkey, sign, pubkey2)
+        isok = ecdsa.Ecdsa.verify(binkey.decode("latin1"), sign, pubkey2)
         # pylint: disable=consider-using-assignment-expr
         if isok:
-            print("Key was signed by", rolename)
+            print("Key", key, "was signed by accounts", rolename,"key")
             return True
     return False
 
@@ -662,7 +719,19 @@ def _main_userverify_ecdsa():
     if "key" in drinfo and "sig" in drinfo:
         _userverify_ecdsa("OWNER", account_info["owner"], drinfo["key"], drinfo["sig"])
     if "key-a" in drinfo and "sig-a" in drinfo:
-        _userverify_ecdsa("ACTIVE", account_info["active"], drinfo["key"], drinfo["sig"])
+        _userverify_ecdsa("ACTIVE", account_info["active"], drinfo["key-a"], drinfo["sig-a"])
+
+def _main_coinzdensepubkey_pass():
+    """Main for calculating coinzdense pubkey from username and password"""
+    if len(argv) < 5:
+        print("Please supply an account name, hashlength, otsbits and level-0 key height on the commandline")
+        sys.exit(1)
+    account = argv[1]
+    hashlen = int(argv[2])
+    otsbits = int(argv[3])
+    l0height = int(argv[4])
+    password = getpass("Password : ")
+    print("Pubkey :",parameterized_coinzdense_pubkey(account, password, hashlen, otsbits, l0height))
 
 def _main_disasterkey_pass():
     """Main for getting the private disaster recovery key from the master password without network interaction"""
@@ -697,4 +766,4 @@ def _main_validate():
     print("ERROR: Not yet implemented")
 
 if __name__ == "__main__":
-    _main_userpost_masterpass()
+    _main_coinzdensepubkey_pass()
