@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='hiveqdpr',
-    version="0.2.2",
+    version="0.3.0",
     description="Hive Quantum-Disaster Prepare tool",
     long_description="Leave some data on your HIVE account for a one-time quantum disaster recovery.",
     author='Rob Meijer',
@@ -20,14 +20,9 @@ setup(
             'hqpdr-userpost-randomkey = hiveqdpr:_main_userpost_randomkey',
             'hqpdr-userpost-wif = hiveqdpr:_main_userpost_wif',
             'hqpdr-userverify-ecdsa = hiveqdpr:_main_userverify_ecdsa',
-            'hqpdr-coinzdensepubkey-pass = hiveqdpr:_main_coinzdensepubkey_pass',
+            'hqpdr-coinzdensepubkey = hiveqdpr:_main_coinzdensepubkey',
             'hqpdr-disasterkey-pass = hiveqdpr:_main_disasterkey_pass',
-            'hqpdr-disasterkey-bip39 = hiveqdpr:_main_disasterkey_bip38',
-            'hqpdr-bip39-wif = hiveqdpr:_main_bip38_wif',
-            'hqpdr-bip39-masterpass = hiveqdpr:_main_bip38_masterpass',
-            'hqpdr-sign-pass = hiveqdpr:_main_sign_pass',
             'hqpdr-sign-wif = hiveqdpr:_main_sign_wif',
-            'hqpdr-sign-bip38 = hiveqdpr:_main_sign_bip38',
             'hqpdr-validate = hiveqdpr:_main_validate'
         ],
     },
@@ -42,5 +37,5 @@ setup(
         'Programming Language :: Python :: 3',
         'Topic :: Software Development :: Libraries :: Python Modules',
     ],
-    install_requires=["base58", "lighthive","starkbank-ecdsa","bip39","PyNaCl","libnacl","sympy"],
+    install_requires=["base58", "lighthive","starkbank-ecdsa","PyNaCl","libnacl","sympy"],
 )

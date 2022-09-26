@@ -4,6 +4,7 @@ import json
 import sys
 from sys import argv
 import hashlib
+import base64
 from hashlib import sha256
 from getpass import getpass
 from binascii import hexlify
@@ -16,7 +17,6 @@ from libnacl import crypto_kdf_keygen as _nacl2_keygen
 from libnacl import crypto_kdf_derive_from_key as _nacl2_key_derive
 from nacl.hash import blake2b as _nacl1_hash_function
 from nacl.encoding import RawEncoder as _Nacl1RawEncoder
-import bip39
 from lighthive.client import Client
 from lighthive.datastructures import Operation
 from base58 import b58encode, b58decode
@@ -287,10 +287,29 @@ class OneTimeValidator:
 # START OF CODE THAT NEEDS MINOR REFACTOR TO BE MADE PART OF COINZDENSE
 
 def parameterized_coinzdense_pubkey(account, password, hashlen, otsbits, l0height):
-    """Calculate a possible CoinZdense pubkey given parameters"""
+    """Calculate a possible CoinZdense pubkey given parameters
+
+    Parameters
+    ----------
+    account : string
+        HIVE account name
+    password : string
+        HIVE master password or alt password
+    hashlen : int
+        The hash lengt uses throughout the hash-based signing implementation
+    otsbits : int
+        The number of bits encoded per up/down set of OTS chains
+    l0height : int
+        Merkle tree height for the level zero level key
+
+    Returns
+    -------
+    string
+        WIF encoded CoinZdense pubkey
+    """
     seedkey = key_from_creds(account, "czdowner", password)
     otscount = 1 << l0height
-    levelsalt = _nacl2_key_derive(hashlen, 0, "levelslt", seedkey) 
+    levelsalt = _nacl2_key_derive(hashlen, 0, "levelslt", seedkey)
     entropy_per_signature = _ots_pairs_per_signature(hashlen, otsbits) + 2 # nonce plus spare nonce
     next_index = 1
     ots_pubkeys = []
@@ -298,6 +317,7 @@ def parameterized_coinzdense_pubkey(account, password, hashlen, otsbits, l0heigh
         otsk = OneTimeSigningKey(hashlen, otsbits, levelsalt, seedkey, next_index)
         ots_pubkeys.append(otsk.get_pubkey())
         next_index += entropy_per_signature
+    # pylint: disable=while-used
     while len(ots_pubkeys) > 1:
         ots_pubkeys = [_nacl1_hash_function(ots_pubkeys[i] + ots_pubkeys[i+1],
                                             digest_size=hashlen,
@@ -438,24 +458,31 @@ def compressed_to_pubkey(compressed):
 
     Parameters
     ----------
-    pubkey : bytes
+    compressed : bytes
         Binary compressed pubkey without WIF checksum
 
     Returns
     -------
     ellipticcurve.PublicKey
         ECDSA pubkey object
+
+    Raises
+    ------
+    RuntimeError
+        Thrown if invalid formatted compressed pubkey
     """
     _p = 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f
     switchbyte = compressed[:1]
     x_coord = int.from_bytes(compressed[1:], byteorder='big', signed=False)
     y_values = sqrt_mod( (x_coord**3 + 7) % _p, _p, True )
     if switchbyte == b'\x02':
+        # pylint: disable=compare-to-zero
         if y_values[0] % 2 == 0:
             y_coord = y_values[0]
         else:
             y_coord = y_values[1]
     elif switchbyte == b'\x03':
+        # pylint: disable=compare-to-zero
         if y_values[0] % 2 == 0:
             y_coord = y_values[1]
         else:
@@ -559,19 +586,9 @@ class HiveAccount:
     def _disaster_pubkey(self):
         """Derive the binary disaster recovery pubkey from the binary private key"""
         # Derive a salt for hashing operations from the private key
-        hashing_salt = _nacl2_key_derive(self.keylen, 0, self.scope, self.disaster)
+        hashing_salt = _nacl2_key_derive(self.keylen, 0, "levelslt", self.disaster)
         otsk = OneTimeSigningKey(self.keylen, self.otsbits, hashing_salt, self.disaster, 1)
         return otsk.get_pubkey()
-
-    def paperwallet(self):
-        """The disaster recovery private key as list of words to write down as a paper wallet
-
-        Returns
-        -------
-        string
-            List of words to use as paper wallet
-        """
-        return bip39.encode_bytes(self.disaster)
 
     def get_privkey(self):
         """Get disaster recovery privkey as WIF
@@ -581,7 +598,18 @@ class HiveAccount:
         string
             Base58 representation of the disaster recovery private key.
         """
-        return key_to_wif(self.disaster, Keytype.QDRECOVERYPUBKEY)
+        return key_to_wif(self.disaster, Keytype.QDRECOVERYPRIVKEY)
+
+    def get_pubkey(self):
+        """Get the public recovery key
+
+        Returns
+        -------
+        sting
+            WIF formatted b58 recovery pubkey
+        """
+        return key_to_wif(self._disaster_pubkey(), Keytype.QDRECOVERYPUBKEY)
+
 
     def _owner_sign(self, data):
         """Sign the disastery recovery key with the ECDSA owner key"""
@@ -634,7 +662,7 @@ def _main_userpost_masterpass():
     password = getpass("Password for " + username + ": ")
     account = HiveAccount(username, password=password)
     account.update_account_json()
-    print("Registered disaster recovery key")
+    print("Registered disaster recovery key:", account.get_pubkey())
 
 def _main_userpost_altpass():
     """Main for publishing an alternate-password-derived disaster-recovery key as account meta."""
@@ -648,7 +676,7 @@ def _main_userpost_altpass():
     active = getpass("Active key : ")
     account = HiveAccount(username, password=password, ownerwif=owner, activewif=active)
     account.update_account_json()
-    print("Registered disaster recovery key")
+    print("Registered disaster recovery key :", account.get_pubkey())
 
 def _main_userpost_randomkey():
     """Main for publishing a new randomly created disaster-recovery key as account meta."""
@@ -663,7 +691,7 @@ def _main_userpost_randomkey():
     active = getpass("Active key : ")
     account = HiveAccount(username, wif=wif, ownerwif=owner, activewif=active)
     account.update_account_json()
-    print("Registered disaster recovery key")
+    print("Registered disaster recovery key: ", account.get_pubkey())
     print("Make sure to store the new disaster recovery key somewhere safe")
 
 def _main_userpost_wif():
@@ -678,7 +706,7 @@ def _main_userpost_wif():
     active = getpass("Active key : ")
     account = HiveAccount(username, wif=wif, ownerwif=owner, activewif=active)
     account.update_account_json()
-    print("Registered disaster recovery key")
+    print("Registered disaster recovery key:", account.get_pubkey())
 
 def _userverify_ecdsa(rolename, roleinfo, key, sig):
     pubkeys = []
@@ -688,7 +716,7 @@ def _userverify_ecdsa(rolename, roleinfo, key, sig):
     binkey = wif_to_binary(key, Keytype.QDRECOVERYPUBKEY)
     binsig = b58decode(sig)
     for pubkey in pubkeys:
-        pubkey2 = compressed_to_pubkey(wif_to_binary(pubkey, Keytype.ECDSACOMPRESSEDPUBKEY)) 
+        pubkey2 = compressed_to_pubkey(wif_to_binary(pubkey, Keytype.ECDSACOMPRESSEDPUBKEY))
         sign = ecdsasignature.Signature.fromDer(binsig, recoveryByte=True)
         isok = ecdsa.Ecdsa.verify(binkey.decode("latin1"), sign, pubkey2)
         # pylint: disable=consider-using-assignment-expr
@@ -721,7 +749,7 @@ def _main_userverify_ecdsa():
     if "key-a" in drinfo and "sig-a" in drinfo:
         _userverify_ecdsa("ACTIVE", account_info["active"], drinfo["key-a"], drinfo["sig-a"])
 
-def _main_coinzdensepubkey_pass():
+def _main_coinzdensepubkey():
     """Main for calculating coinzdense pubkey from username and password"""
     if len(argv) < 5:
         print("Please supply an account name, hashlength, otsbits and level-0 key height on the commandline")
@@ -731,39 +759,58 @@ def _main_coinzdensepubkey_pass():
     otsbits = int(argv[3])
     l0height = int(argv[4])
     password = getpass("Password : ")
-    print("Pubkey :",parameterized_coinzdense_pubkey(account, password, hashlen, otsbits, l0height))
+    seedkey = key_from_creds(account, "czdowner", password)
+    print("Privkey:", key_to_wif(seedkey,Keytype.COINZDENSEPRIVKEY)) 
+    print("Pubkey :", parameterized_coinzdense_pubkey(account, password, hashlen, otsbits, l0height))
 
 def _main_disasterkey_pass():
     """Main for getting the private disaster recovery key from the master password without network interaction"""
-    print("ERROR: Not yet implemented")
+    if len(argv) < 2:
+        print("Please supply an account name on the commandline")
+        sys.exit(1)
+    username = argv[1]
+    password = getpass("Password : ")
+    disaster = key_from_creds(username, "disaster", password)
+    print("Recovery-Privkey:", key_to_wif(disaster, Keytype.QDRECOVERYPRIVKEY))
+    levelsalt = _nacl2_key_derive(24, 0, "levelslt", disaster)
+    otskey = OneTimeSigningKey(24, 12, levelsalt, disaster, 1)
+    print("Recovery-Pubkey:", key_to_wif(otskey.get_pubkey(),Keytype.QDRECOVERYPUBKEY))
 
-def _main_disasterkey_bip38():
-    """Main for restoring the private disaster recovery key from bip38 word list"""
-    print("ERROR: Not yet implemented")
-
-def _main_bip38_wif():
-    """Main for turning the private disaster recovery key into a bip38 word list"""
-    print("ERROR: Not yet implemented")
-
-def _main_bip38_masterpass():
-    """Main for getting the bip38 word list of the private disaster recovery key from the master password"""
-    print("ERROR: Not yet implemented")
-
-def _main_sign_pass():
-    """Main to sign a hex encoded binary object with private disaster recovery key using the master password"""
-    print("ERROR: Not yet implemented")
 
 def _main_sign_wif():
     """Main to sign a hex encoded binary object with private disaster recovery key using Wif"""
-    print("ERROR: Not yet implemented")
-
-def _main_sign_bip38():
-    """Main to sign a hex encoded binary object with private disaster recovery key using bip38 wordlist"""
-    print("ERROR: Not yet implemented")
+    if len(argv) < 2:
+        print("Please supply a coinzidense level-0 pubkey WIF on the commandline")
+        sys.exit(1)
+    coinzdensewif = argv[1]
+    disasterwif = getpass("Disaster recovery privkey WIF : ")
+    coinzdensekey = wif_to_binary(coinzdensewif, Keytype.COINZDENSEPUBKEY)
+    disasterkey = wif_to_binary(disasterwif, Keytype.QDRECOVERYPRIVKEY)
+    levelsalt = _nacl2_key_derive(24, 0, "levelslt", disasterkey)
+    otskey = OneTimeSigningKey(24, 12, levelsalt, disasterkey, 1)
+    signature = otskey.sign_data(coinzdensekey)
+    print("Signature:")
+    print(base64.b64encode(levelsalt + signature).decode("ascii"))
+    print("Recovery-Pubkey:", key_to_wif(otskey.get_pubkey(),Keytype.QDRECOVERYPUBKEY))
 
 def _main_validate():
     """Main to validate a private disaster recovery key signed hex encoded binary object."""
-    print("ERROR: Not yet implemented")
+    if len(argv) < 4:
+        print("Please supply a coinzidense level-0 pubkey WIF, a recovery pubkey and a HB recovery signature on the commandline")
+        sys.exit(1)
+    coinzdensekey = wif_to_binary(argv[1], Keytype.COINZDENSEPUBKEY)
+    disasterkey = wif_to_binary(argv[2], Keytype.QDRECOVERYPUBKEY)
+    signature = base64.b64decode(argv[3])
+    levelsalt = signature[:24]
+    signature = signature[24:]
+    validator = OneTimeValidator(24, 12, levelsalt, disasterkey)
+    isok = validator.validate_data(coinzdensekey, signature)
+    # pylint: disable=consider-using-assignment-expr
+    if isok:
+        print("Valid signature")
+    else:
+        print("ERROR: Invalid signature")
+
 
 if __name__ == "__main__":
     _main_coinzdensepubkey_pass()
