@@ -2,6 +2,8 @@
 
 The HIVE CoinZdense Disaster Recovery tools is a set of commandline tools for preparing your HIVE account for possible future disaster recovery in case of a succesfull quantum computing atack against the blockchain. It does this by publishing a hash based singing public key into the users meta data json that is (by default) derived from the users master password.
 
+You need to run this tool only once to prepare your account for potential future disaster recovery. 
+
 First do a pip install
 ```
 python3 -m pip install hiveqdpr
